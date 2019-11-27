@@ -57,13 +57,16 @@ static void clook_add_request(struct request_queue *q, struct request *rq)
 	struct clook_data *nd = q->elevator->elevator_data;
 	struct list_head *cur = NULL;
 
+	//This loop will stop the request at the right time
 	list_for_each(cur, &nd->queue) //we advance cur every time
 	{
 		struct request *c = list_entry(cur, struct request, queuelist);
-		if(blk_rq_pos(rq) < diskhead) //request is bigger than disk head
-		//we keep servicing bigger requests until we see a small request again
+		
+		//For CLOOK we keep servicing bigger requests until we see a small request again
 		//we insert when current is smaller than the head and bigger than the request
+		if(blk_rq_pos(rq) < diskhead) //The request is smaller than the disk head
 		{
+			//If current is smaller than diskhead and the request is smaller than current
 			if(blk_rq_pos(c) < diskhead &&
 			   blk_rq_pos(rq) < blk_rq_pos(c))
 				break;
@@ -84,6 +87,7 @@ static void clook_add_request(struct request_queue *q, struct request *rq)
 		direction = 'R';
 	else
 		direction = 'W';
+	
 	printk("[CLOOK] add %c %lu\n", direction, blk_rq_pos(rq));
 
 	list_add_tail(&rq->queuelist, cur);
@@ -167,6 +171,6 @@ module_init(clook_init);
 module_exit(clook_exit);
 
 
-MODULE_AUTHOR("Jens Axboe");
+MODULE_AUTHOR("Denis Ortega");
 MODULE_LICENSE("GPL");
 MODULE_DESCRIPTION("CLOOK IO scheduler");
