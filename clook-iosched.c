@@ -1,10 +1,8 @@
 /*
  * modified by Denis Ortega
  
- * We keep the current disk head sector in clook_dispatch
- * and keep a requests sorted in the add_request method
- * from there everything gets dispatched in a sorted order
- * according to the C-LOOK algorithm
+ * With C-LOOK Algorithm we keep the current disk head sector with clook_dispatch.
+ * With the add_request method, everything stays sorted and dispatched.
  *
  */
 
@@ -16,7 +14,7 @@
 #include <linux/slab.h>
 #include <linux/init.h>
 
-int diskhead = -1;
+int diskheadpos = -1;
 
 struct clook_data {
 	struct list_head queue;
@@ -37,14 +35,16 @@ static int clook_dispatch(struct request_queue *q, int force)
 		rq = list_entry(nd->queue.next, struct request, queuelist);
 		list_del_init(&rq->queuelist);
 		elv_dispatch_sort(q, rq);
-		diskhead = blk_rq_pos(rq); //assign position to disk head
+		
+		diskheadpos = blk_rq_pos(rq); //assign position to disk head
 
-		//print whether data is being read or write
+		//Direction of disk head, READ or WRITE
 		char direction;
 		if(rq_data_dir(rq) == READ)
 			direction = 'R';
 		else
 			direction = 'W';
+		
 		printk("[CLOOK] dsp %c %lu\n", direction, blk_rq_pos(rq));
 
 		return 1;
@@ -55,33 +55,30 @@ static int clook_dispatch(struct request_queue *q, int force)
 static void clook_add_request(struct request_queue *q, struct request *rq)
 {
 	struct clook_data *nd = q->elevator->elevator_data;
-	struct list_head *cur = NULL;
+	struct list_head *current = NULL;
 
 	//This loop will stop the request at the right time
-	list_for_each(cur, &nd->queue) //we advance cur every time
+	list_for_each(current, &nd->queue) //we advance cur every time
 	{
-		struct request *c = list_entry(cur, struct request, queuelist);
+		struct request *c = list_entry(current, struct request, queuelist);
 		
 		//For CLOOK we keep servicing bigger requests until we see a small request again
 		//we insert when current is smaller than the head and bigger than the request
-		if(blk_rq_pos(rq) < diskhead) //The request is smaller than the disk head
+		if(blk_rq_pos(rq) < diskheadpos) //The disk head is greater than the request
 		{
 			//If current is smaller than diskhead and the request is smaller than current
-			if(blk_rq_pos(c) < diskhead &&
+			if(blk_rq_pos(c) < diskheadpos &&
 			   blk_rq_pos(rq) < blk_rq_pos(c))
 				break;
 		}
-		else //request is bigger than disk head
+		else //Request is bigger than the disk head
 		{
-		//find sport where current is smaller than the head or current smaller than 
-		//request
-			if(blk_rq_pos(c) < diskhead ||
+			if(blk_rq_pos(c) < diskheadpos ||
 			   blk_rq_pos(rq) < blk_rq_pos(c))
 				break;
 		}
 	}
 
-	//print whether data is being read or write
 	char direction;
 	if(rq_data_dir(rq) == READ)
 		direction = 'R';
@@ -90,7 +87,7 @@ static void clook_add_request(struct request_queue *q, struct request *rq)
 	
 	printk("[CLOOK] add %c %lu\n", direction, blk_rq_pos(rq));
 
-	list_add_tail(&rq->queuelist, cur);
+	list_add_tail(&rq->queuelist, current);
 
 }
 
