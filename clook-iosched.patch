@@ -1,0 +1,216 @@
+--- clook-iosched.c	2019-11-27 01:53:39.304400637 -0500
++++ ../block/noop-iosched.c	2012-11-05 03:57:06.000000000 -0500
+@@ -1,14 +1,6 @@
+ /*
+- * modified by Denis Ortega
+- 
+- * We keep the current disk head sector in clook_dispatch
+- * and keep a requests sorted in the add_request method
+- * from there everything gets dispatched in a sorted order
+- * according to the C-LOOK algorithm
+- *
++ * elevator noop
+  */
+-
+-
+ #include <linux/blkdev.h>
+ #include <linux/elevator.h>
+ #include <linux/bio.h>
+@@ -16,95 +8,41 @@
+ #include <linux/slab.h>
+ #include <linux/init.h>
+ 
+-int diskhead = -1;
+-
+-struct clook_data {
++struct noop_data {
+ 	struct list_head queue;
+ };
+ 
+-static void clook_merged_requests(struct request_queue *q, struct request *rq,
++static void noop_merged_requests(struct request_queue *q, struct request *rq,
+ 				 struct request *next)
+ {
+ 	list_del_init(&next->queuelist);
+ }
+ 
+-static int clook_dispatch(struct request_queue *q, int force)
++static int noop_dispatch(struct request_queue *q, int force)
+ {
+-	struct clook_data *nd = q->elevator->elevator_data;
++	struct noop_data *nd = q->elevator->elevator_data;
+ 
+ 	if (!list_empty(&nd->queue)) {
+ 		struct request *rq;
+ 		rq = list_entry(nd->queue.next, struct request, queuelist);
+ 		list_del_init(&rq->queuelist);
+ 		elv_dispatch_sort(q, rq);
+-		diskhead = blk_rq_pos(rq); //assign position to disk head
+-
+-		//print whether data is being read or write
+-		char direction;
+-		if(rq_data_dir(rq) == READ)
+-			direction = 'R';
+-		else
+-			direction = 'W';
+-		printk("[CLOOK] dsp %c %lu\n", direction, blk_rq_pos(rq));
+-
+ 		return 1;
+ 	}
+ 	return 0;
+ }
+ 
+-static void clook_add_request(struct request_queue *q, struct request *rq)
+-{
+-	struct clook_data *nd = q->elevator->elevator_data;
+-	struct list_head *cur = NULL;
+-
+-	//This loop will stop the request at the right time
+-	list_for_each(cur, &nd->queue) //we advance cur every time
+-	{
+-		struct request *c = list_entry(cur, struct request, queuelist);
+-		
+-		//For CLOOK we keep servicing bigger requests until we see a small request again
+-		//we insert when current is smaller than the head and bigger than the request
+-		if(blk_rq_pos(rq) < diskhead) //The request is smaller than the disk head
+-		{
+-			//If current is smaller than diskhead and the request is smaller than current
+-			if(blk_rq_pos(c) < diskhead &&
+-			   blk_rq_pos(rq) < blk_rq_pos(c))
+-				break;
+-		}
+-		else //request is bigger than disk head
+-		{
+-		//find sport where current is smaller than the head or current smaller than 
+-		//request
+-			if(blk_rq_pos(c) < diskhead ||
+-			   blk_rq_pos(rq) < blk_rq_pos(c))
+-				break;
+-		}
+-	}
+-
+-	//print whether data is being read or write
+-	char direction;
+-	if(rq_data_dir(rq) == READ)
+-		direction = 'R';
+-	else
+-		direction = 'W';
+-	
+-	printk("[CLOOK] add %c %lu\n", direction, blk_rq_pos(rq));
+-
+-	list_add_tail(&rq->queuelist, cur);
+-
+-}
+-
+-static int clook_queue_empty(struct request_queue *q)
++static void noop_add_request(struct request_queue *q, struct request *rq)
+ {
+-	struct clook_data *nd = q->elevator->elevator_data;
++	struct noop_data *nd = q->elevator->elevator_data;
+ 
+-	return list_empty(&nd->queue);
++	list_add_tail(&rq->queuelist, &nd->queue);
+ }
+ 
+ static struct request *
+-clook_former_request(struct request_queue *q, struct request *rq)
++noop_former_request(struct request_queue *q, struct request *rq)
+ {
+-	struct clook_data *nd = q->elevator->elevator_data;
++	struct noop_data *nd = q->elevator->elevator_data;
+ 
+ 	if (rq->queuelist.prev == &nd->queue)
+ 		return NULL;
+@@ -112,65 +50,64 @@
+ }
+ 
+ static struct request *
+-clook_latter_request(struct request_queue *q, struct request *rq)
++noop_latter_request(struct request_queue *q, struct request *rq)
+ {
+-	struct clook_data *nd = q->elevator->elevator_data;
++	struct noop_data *nd = q->elevator->elevator_data;
+ 
+ 	if (rq->queuelist.next == &nd->queue)
+ 		return NULL;
+ 	return list_entry(rq->queuelist.next, struct request, queuelist);
+ }
+ 
+-static void *clook_init_queue(struct request_queue *q)
++static int noop_init_queue(struct request_queue *q)
+ {
+-	struct clook_data *nd;
++	struct noop_data *nd;
+ 
+ 	nd = kmalloc_node(sizeof(*nd), GFP_KERNEL, q->node);
+ 	if (!nd)
+-		return NULL;
++		return -ENOMEM;
++
+ 	INIT_LIST_HEAD(&nd->queue);
+-	return nd;
++	q->elevator->elevator_data = nd;
++	return 0;
+ }
+ 
+-static void clook_exit_queue(struct elevator_queue *e)
++static void noop_exit_queue(struct elevator_queue *e)
+ {
+-	struct clook_data *nd = e->elevator_data;
++	struct noop_data *nd = e->elevator_data;
+ 
+ 	BUG_ON(!list_empty(&nd->queue));
+ 	kfree(nd);
+ }
+ 
+-static struct elevator_type elevator_clook = {
++static struct elevator_type elevator_noop = {
+ 	.ops = {
+-		.elevator_merge_req_fn		= clook_merged_requests,
+-		.elevator_dispatch_fn		= clook_dispatch,
+-		.elevator_add_req_fn		= clook_add_request,
+-		.elevator_queue_empty_fn	= clook_queue_empty,
+-		.elevator_former_req_fn		= clook_former_request,
+-		.elevator_latter_req_fn		= clook_latter_request,
+-		.elevator_init_fn		= clook_init_queue,
+-		.elevator_exit_fn		= clook_exit_queue,
++		.elevator_merge_req_fn		= noop_merged_requests,
++		.elevator_dispatch_fn		= noop_dispatch,
++		.elevator_add_req_fn		= noop_add_request,
++		.elevator_former_req_fn		= noop_former_request,
++		.elevator_latter_req_fn		= noop_latter_request,
++		.elevator_init_fn		= noop_init_queue,
++		.elevator_exit_fn		= noop_exit_queue,
+ 	},
+-	.elevator_name = "clook",
++	.elevator_name = "noop",
+ 	.elevator_owner = THIS_MODULE,
+ };
+ 
+-static int __init clook_init(void)
++static int __init noop_init(void)
+ {
+-	elv_register(&elevator_clook);
+-
+-	return 0;
++	return elv_register(&elevator_noop);
+ }
+ 
+-static void __exit clook_exit(void)
++static void __exit noop_exit(void)
+ {
+-	elv_unregister(&elevator_clook);
++	elv_unregister(&elevator_noop);
+ }
+ 
+-module_init(clook_init);
+-module_exit(clook_exit);
++module_init(noop_init);
++module_exit(noop_exit);
+ 
+ 
+-MODULE_AUTHOR("Denis Ortega");
++MODULE_AUTHOR("Jens Axboe");
+ MODULE_LICENSE("GPL");
+-MODULE_DESCRIPTION("CLOOK IO scheduler");
++MODULE_DESCRIPTION("No-op IO scheduler");
